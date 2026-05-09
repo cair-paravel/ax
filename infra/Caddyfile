@@ -9,6 +9,12 @@
 	handle /_ax/health {
 		respond "ok" 200
 	}
+
+	# Proxy the runner API behind the platform domain so we don't need to expose :8080.
+	# Example: https://sixty.to/_ax/runner/health -> runner /health
+	handle_path /_ax/runner/* {
+		reverse_proxy agentx-runner:8080
+	}
 }
 
 import /etc/caddy/apps/*.caddy

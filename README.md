@@ -53,6 +53,12 @@ cd agentx
 docker compose -f infra/docker-compose.yml up --build -d
 ```
 
+After DNS is working for your base domain, you can use the runner API via Caddy:
+
+```bash
+ax login https://sixty.to/_ax/runner --token <RUNNER_TOKEN>
+```
+
 ### `ax.toml` reference
 
 Minimal web app:

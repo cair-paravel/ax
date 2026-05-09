@@ -163,7 +163,7 @@ def deploy(path: Path = typer.Option(Path("."), "--path")) -> None:
 
     with _http(cfg) as client:
         r = client.post(
-            "/v1/deploy",
+            "v1/deploy",
             data={"config_json": json.dumps(payload)},
             files={"source": ("source.tar.gz", data, "application/gzip")},
         )
@@ -177,7 +177,7 @@ def ps_() -> None:
     """List apps."""
     cfg = _load_client_config()
     with _http(cfg) as client:
-        r = client.get("/v1/apps")
+        r = client.get("v1/apps")
         if r.status_code >= 400:
             raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
         apps = r.json()
@@ -192,7 +192,7 @@ def logs(name: str, tail: int = typer.Option(200, "--tail")) -> None:
     """Fetch recent logs for an app."""
     cfg = _load_client_config()
     with _http(cfg) as client:
-        r = client.get(f"/v1/apps/{name}/logs", params={"tail": tail})
+        r = client.get(f"v1/apps/{name}/logs", params={"tail": tail})
         if r.status_code >= 400:
             raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
         typer.echo(r.text.rstrip())

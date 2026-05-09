@@ -1,0 +1,2 @@
+[console_scripts]
+ax = ax.main:app
