@@ -1,10 +1,10 @@
 services:
   caddy:
     image: caddy:2
-    container_name: agentx-caddy
+    container_name: ax-caddy
     restart: unless-stopped
     environment:
-      - PLATFORM_BASE_DOMAIN=localhost
+      - PLATFORM_BASE_DOMAIN=${PLATFORM_BASE_DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -12,28 +12,30 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-runner-subdomain.caddy:/etc/caddy/caddy-runner-subdomain.caddy:ro
       - caddy_apps:/etc/caddy/apps
     networks:
-      - agentx
+      - ax
 
   runner:
     build:
       context: ../runner
-    container_name: agentx-runner
+    container_name: ax-runner
     restart: unless-stopped
     environment:
-      - RUNNER_TOKEN=local-dev-token
+      - RUNNER_TOKEN=${RUNNER_TOKEN:-local-dev-token}
       - RUNNER_DATA_DIR=/data
-      - CADDY_CONTAINER_NAME=agentx-caddy
+      - CADDY_CONTAINER_NAME=ax-caddy
       - CADDY_APPS_DIR=/etc/caddy/apps
-      - PLATFORM_BASE_DOMAIN=localhost
+      - PLATFORM_BASE_DOMAIN=${PLATFORM_BASE_DOMAIN:-localhost}
+      - AX_NETWORK=ax
     volumes:
       - runner_data:/data
       - caddy_apps:/etc/caddy/apps
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - agentx
-    # Not exposed to the host; accessed via Caddy at /_ax/runner/*
+      - ax
+    # Not exposed to the host; accessed via Caddy at https://runner.<PLATFORM_BASE_DOMAIN>
 
 volumes:
   runner_data:
@@ -42,6 +44,6 @@ volumes:
   caddy_apps:
 
 networks:
-  agentx:
-    name: agentx
+  ax:
+    name: ax
 

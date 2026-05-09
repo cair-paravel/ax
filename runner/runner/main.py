@@ -18,12 +18,12 @@ from pydantic import BaseModel, Field
 
 DATA_DIR = Path(os.environ.get("RUNNER_DATA_DIR", "/data")).resolve()
 RUNNER_TOKEN = os.environ.get("RUNNER_TOKEN", "")
-CADDY_CONTAINER_NAME = os.environ.get("CADDY_CONTAINER_NAME", "agentx-caddy")
+CADDY_CONTAINER_NAME = os.environ.get("CADDY_CONTAINER_NAME", "ax-caddy")
 CADDY_APPS_DIR = Path(os.environ.get("CADDY_APPS_DIR", "/etc/caddy/apps"))
 PLATFORM_BASE_DOMAIN = os.environ.get("PLATFORM_BASE_DOMAIN", "").strip()
 PLATFORM_ROUTES_DIRNAME = "platform-routes"
 
-AGENTX_NETWORK = os.environ.get("AGENTX_NETWORK", "agentx")
+AX_NETWORK = os.environ.get("AX_NETWORK", "ax")
 APPS_ROOT = DATA_DIR / "apps"
 BUILDS_ROOT = DATA_DIR / "builds"
 
@@ -77,7 +77,7 @@ class AppSummary(BaseModel):
     platform_path: str | None = None
 
 
-app = FastAPI(title="agentx-runner", version="0.1.0")
+app = FastAPI(title="ax-runner", version="0.1.0")
 
 
 @app.get("/health")
@@ -194,11 +194,11 @@ async def deploy(
         raise HTTPException(status_code=400, detail="Missing pyproject.toml at repo root (MVP expects repo-root pyproject)")
 
     # Docker requires the Dockerfile to be within the build context.
-    dockerfile_name = "Dockerfile.agentx"
+    dockerfile_name = "Dockerfile.ax"
     dockerfile = src_dir / dockerfile_name
     dockerfile.write_text(_dockerfile_template(cfg), encoding="utf-8")
 
-    image_tag = f"agentx/{name}:{build_id}"
+    image_tag = f"ax/{name}:{build_id}"
 
     try:
         image, logs = DOCKER.images.build(
@@ -234,7 +234,7 @@ async def deploy(
             image=image_tag,
             detach=True,
             name=f"ax-{name}",
-            network=AGENTX_NETWORK,
+            network=AX_NETWORK,
             environment={**cfg.env, "PORT": internal_port},
             restart_policy={"Name": "unless-stopped"},
         )

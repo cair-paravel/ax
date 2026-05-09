@@ -1,9 +1,0 @@
-pyproject.toml
-agentx_cli.egg-info/PKG-INFO
-agentx_cli.egg-info/SOURCES.txt
-agentx_cli.egg-info/dependency_links.txt
-agentx_cli.egg-info/entry_points.txt
-agentx_cli.egg-info/requires.txt
-agentx_cli.egg-info/top_level.txt
-ax/__init__.py
-ax/main.py

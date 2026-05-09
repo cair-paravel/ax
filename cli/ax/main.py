@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import json
 import os
+import secrets
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 import typer
@@ -16,8 +18,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 app = typer.Typer(no_args_is_help=True)
 
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "agentx"
+CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+CONFIG_DIR = CONFIG_HOME / "ax"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+RUNNER_TOKEN_PATH = CONFIG_DIR / "runner-token"
 
 
 @dataclass
@@ -28,7 +32,9 @@ class ClientConfig:
 
 def _load_client_config() -> ClientConfig:
     if not CONFIG_PATH.exists():
-        raise typer.Exit("Not logged in. Run: ax login <base_url> --token <token>")
+        raise typer.Exit(
+            "Not logged in. Run: ax login <base-domain> (after ax generate), or ax login <base-domain> --token …"
+        )
     d = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     return ClientConfig(base_url=d["base_url"], token=d["token"])
 
@@ -36,6 +42,44 @@ def _load_client_config() -> ClientConfig:
 def _save_client_config(cfg: ClientConfig) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps({"base_url": cfg.base_url, "token": cfg.token}, indent=2) + "\n", encoding="utf-8")
+
+
+def _read_saved_runner_token() -> str | None:
+    if not RUNNER_TOKEN_PATH.exists():
+        return None
+    t = RUNNER_TOKEN_PATH.read_text(encoding="utf-8").strip()
+    return t or None
+
+
+def _runner_api_url_from_base(domain: str) -> str:
+    """Map platform base to runner API origin: hostname → https://runner.<host> (http for *.localhost); IP → http://<ip>."""
+    d = domain.strip()
+    if not d:
+        raise typer.Exit("Domain is empty.")
+    d = d.removeprefix("https://").removeprefix("http://").rstrip("/")
+    host = d.split("/")[0].split("?")[0].strip()
+    if not host:
+        raise typer.Exit("Domain is empty.")
+
+    ip_test = host.strip("[]")
+    try:
+        parsed = ipaddress.ip_address(ip_test)
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        if isinstance(parsed, ipaddress.IPv6Address):
+            return f"http://[{parsed.compressed}]"
+        return f"http://{parsed.compressed}"
+
+    hl = host.lower()
+    if hl.startswith("runner."):
+        runner_host = host
+    else:
+        runner_host = f"runner.{host}"
+    rl = runner_host.lower()
+    use_http = rl == "runner.localhost" or rl.endswith(".localhost")
+    scheme = "http" if use_http else "https"
+    return f"{scheme}://{runner_host}"
 
 
 def _read_ax_toml(path: Path) -> dict[str, Any]:
@@ -121,9 +165,59 @@ def _http(cfg: ClientConfig) -> httpx.Client:
 
 
 @app.command()
-def login(base_url: str, token: str = typer.Option(..., "--token")) -> None:
-    """Store runner URL + token."""
+def generate(
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing runner-token"),
+) -> None:
+    """Generate RUNNER_TOKEN, save to ~/.config/ax/runner-token, then use the same value on the server (setup.sh) and run ax login."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if RUNNER_TOKEN_PATH.exists() and not force:
+        raise typer.Exit(
+            f"{RUNNER_TOKEN_PATH} already exists. Use --force to generate a new token "
+            "(you must update the server infra/.env to match)."
+        )
+    token = secrets.token_hex(32)
+    RUNNER_TOKEN_PATH.write_text(token + "\n", encoding="utf-8")
+    try:
+        RUNNER_TOKEN_PATH.chmod(0o600)
+    except OSError:
+        pass
+    typer.echo(f"Saved runner token to {RUNNER_TOKEN_PATH} (mode 600)\n")
+    typer.echo("On the server (same token for RUNNER_TOKEN):")
+    typer.echo("  • Interactive: ./setup.sh — paste the token when asked")
+    typer.echo("  • Non-interactive: export RUNNER_TOKEN='…' && export PLATFORM_BASE_DOMAIN='your.domain' && ./setup.sh")
+    typer.echo("\nToken (copy to server or export RUNNER_TOKEN):\n")
+    typer.echo(token)
+    typer.echo("\nThen on this machine (DNS: A/AAAA record runner → server IP):")
+    typer.echo("  ax login YOUR_BASE_DOMAIN")
+    typer.echo("  example: ax login sixty.to")
+    typer.echo("  (omit --token; it reads the same file)")
+
+
+@app.command()
+def login(
+    base_domain: Annotated[
+        str,
+        typer.Argument(
+            help="Platform base: hostname (e.g. sixty.to, localhost) or public IP. Hostname → https://runner.<host>; IP → http://<ip> (see Caddy /v1 on :80).",
+        ),
+    ],
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="Bearer token; defaults to ~/.config/ax/runner-token from ax generate",
+    ),
+) -> None:
+    """Save runner API URL (derived from base domain) and token."""
+    if token is None:
+        token = _read_saved_runner_token()
+    if not token:
+        raise typer.Exit(
+            "No token. Run `ax generate` first, or pass --token …"
+        )
+    base_url = _runner_api_url_from_base(base_domain)
     _save_client_config(ClientConfig(base_url=base_url, token=token))
+    typer.echo(f"Runner API: {base_url}")
     typer.echo(f"Saved config to {CONFIG_PATH}")
 
 

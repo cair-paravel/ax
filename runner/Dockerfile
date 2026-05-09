@@ -1,18 +1,21 @@
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    UV_SYSTEM_PYTHON=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl git docker.io \
+      ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY pyproject.toml /app/pyproject.toml
-COPY runner /app/runner
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
-RUN pip install -U pip && pip install .
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY runner ./runner
+
+RUN uv sync --frozen
 
 EXPOSE 8080
-CMD ["python", "-m", "runner.main"]
-
+CMD ["uv", "run", "python", "-m", "runner.main"]

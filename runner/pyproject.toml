@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentx-runner"
+name = "ax-runner"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agentx-runner = "runner.main:main"
+ax-runner = "runner.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
