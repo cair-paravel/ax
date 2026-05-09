@@ -408,3 +408,7 @@ def _reconcile_caddy() -> None:
 
     _reload_caddy()
 
+
+if __name__ == "__main__":
+    main()
+
