@@ -12,7 +12,6 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy-runner-subdomain.caddy:/etc/caddy/caddy-runner-subdomain.caddy:ro
       - caddy_apps:/etc/caddy/apps
     networks:
       - ax
@@ -35,7 +34,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ax
-    # Not exposed to the host; accessed via Caddy at https://runner.<PLATFORM_BASE_DOMAIN>
+    # Not published on the host; reached via Caddy on https://<PLATFORM_BASE_DOMAIN>/v1/...
 
 volumes:
   runner_data:

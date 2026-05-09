@@ -5,11 +5,7 @@
 	admin 0.0.0.0:2019
 }
 
-# Runner API on HTTPS when DNS has runner.<hostname> (see caddy-runner-subdomain.caddy; omitted for IP-only bases).
-import /etc/caddy/caddy-runner-subdomain.caddy
-
-# Runner API on HTTP apex: required when PLATFORM_BASE_DOMAIN is an IPv4 address (no runner.<ip> in DNS/TLS).
-# For hostnames, prefer https://runner.<domain>; this still works as a fallback on :80.
+# Runner API on :80 (needed for raw-IP base, and useful when TLS is not yet issued).
 http://{$PLATFORM_BASE_DOMAIN} {
 	handle /v1/* {
 		reverse_proxy ax-runner:8080
@@ -19,14 +15,19 @@ http://{$PLATFORM_BASE_DOMAIN} {
 	}
 }
 
+# Same host as setup/login: runner API + platform health + path-based apps.
 {$PLATFORM_BASE_DOMAIN} {
+	handle /v1/* {
+		reverse_proxy ax-runner:8080
+	}
+	handle /health {
+		reverse_proxy ax-runner:8080
+	}
 	handle /_ax/health {
 		respond "ok" 200
 	}
 
-	# Platform-path apps: runner generates route snippets here.
 	import /etc/caddy/apps/platform-routes/*.caddy
 }
 
-# Custom-domain / platform-subdomain apps are generated here.
 import /etc/caddy/apps/app-*.caddy

@@ -39,7 +39,7 @@ if [[ -z "$PLATFORM_BASE_DOMAIN" ]]; then
   if [[ ! -t 0 ]]; then
     die "PLATFORM_BASE_DOMAIN is not set and stdin is not a TTY. Export it or create ${ENV_FILE}."
   fi
-  read -r -p "Platform base (hostname e.g. example.com, or IPv4 — no https://): " PLATFORM_BASE_DOMAIN
+  read -r -p "Runner host / PLATFORM_BASE_DOMAIN (your hostname or IP, no https:// — e.g. apps.example.com or 203.0.113.10): " PLATFORM_BASE_DOMAIN
 fi
 
 if [[ -z "$RUNNER_TOKEN" ]]; then
@@ -70,30 +70,6 @@ RUNNER_TOKEN=${RUNNER_TOKEN}
 EOF
 echo "wrote ${ENV_FILE} (mode 600)"
 
-require_cmd python3
-SUBDOMAIN_FILE="${INFRA_DIR}/caddy-runner-subdomain.caddy"
-python3 -c "
-import ipaddress
-import pathlib
-import sys
-
-h = sys.argv[1].strip()
-path = pathlib.Path(sys.argv[2])
-try:
-    ipaddress.ip_address(h.strip('[]'))
-except ValueError:
-    path.write_text(
-        f'runner.{h} {{\n\treverse_proxy ax-runner:8080\n}}\n',
-        encoding='utf-8',
-    )
-else:
-    path.write_text(
-        f'# PLATFORM_BASE_DOMAIN is an IP ({h}). Runner API: http://{h}/v1\n',
-        encoding='utf-8',
-    )
-" "$PLATFORM_BASE_DOMAIN" "$SUBDOMAIN_FILE"
-echo "wrote ${SUBDOMAIN_FILE}"
-
 require_cmd docker
 if ! docker compose version >/dev/null 2>&1; then
   die "docker compose plugin missing. Install docker-compose-plugin."
@@ -104,15 +80,9 @@ docker compose -f "$COMPOSE_FILE" up --build -d
 
 echo ""
 echo "Health checks:"
-export _AX_PBD="$PLATFORM_BASE_DOMAIN"
-if python3 -c "import ipaddress, os; ipaddress.ip_address(os.environ['_AX_PBD'].strip('[]'))" 2>/dev/null; then
-  echo "  curl -fsS http://${PLATFORM_BASE_DOMAIN}/health"
-else
-  echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/_ax/health"
-  echo "  curl -fsS https://runner.${PLATFORM_BASE_DOMAIN}/health"
-  echo "  (optional) curl -fsS http://${PLATFORM_BASE_DOMAIN}/health"
-fi
-unset _AX_PBD
+echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/_ax/health"
+echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/health"
+echo "  (IP-only base: use http://${PLATFORM_BASE_DOMAIN}/health on :80)"
 echo ""
 echo "On your laptop, install the CLI and log in:"
 echo "  uv tool install -e ${REPO_ROOT}/cli"

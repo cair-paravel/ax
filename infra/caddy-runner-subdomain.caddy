@@ -1,4 +1,0 @@
-# Overwritten by ./setup.sh when you use a real hostname. Default: local compose (PLATFORM_BASE_DOMAIN=localhost).
-runner.localhost {
-	reverse_proxy ax-runner:8080
-}

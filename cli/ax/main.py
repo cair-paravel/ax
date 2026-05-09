@@ -8,7 +8,7 @@ import secrets
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable
 
 import httpx
 import typer
@@ -33,7 +33,7 @@ class ClientConfig:
 def _load_client_config() -> ClientConfig:
     if not CONFIG_PATH.exists():
         raise typer.Exit(
-            "Not logged in. Run: ax login <base-domain> (after ax generate), or ax login <base-domain> --token …"
+            "Not logged in. Run: ax login <hostname-or-ip> (after ax generate), or ax login <hostname-or-ip> --token …"
         )
     d = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     return ClientConfig(base_url=d["base_url"], token=d["token"])
@@ -52,7 +52,7 @@ def _read_saved_runner_token() -> str | None:
 
 
 def _runner_api_url_from_base(domain: str) -> str:
-    """Map platform base to runner API origin: hostname → https://runner.<host> (http for *.localhost); IP → http://<ip>."""
+    """Same host as setup/login: https://<host> (http for localhost / *.localhost); IP → http://<ip>."""
     d = domain.strip()
     if not d:
         raise typer.Exit("Domain is empty.")
@@ -72,14 +72,9 @@ def _runner_api_url_from_base(domain: str) -> str:
         return f"http://{parsed.compressed}"
 
     hl = host.lower()
-    if hl.startswith("runner."):
-        runner_host = host
-    else:
-        runner_host = f"runner.{host}"
-    rl = runner_host.lower()
-    use_http = rl == "runner.localhost" or rl.endswith(".localhost")
+    use_http = hl == "localhost" or hl.endswith(".localhost")
     scheme = "http" if use_http else "https"
-    return f"{scheme}://{runner_host}"
+    return f"{scheme}://{host}"
 
 
 def _read_ax_toml(path: Path) -> dict[str, Any]:
@@ -164,6 +159,23 @@ def _http(cfg: ClientConfig) -> httpx.Client:
     )
 
 
+def _runner_call(cfg: ClientConfig, fn: Callable[[httpx.Client], Any]) -> Any:
+    """Run ``fn(client)`` with a short-lived client; turn DNS/connect failures into a clear message."""
+    try:
+        with _http(cfg) as client:
+            return fn(client)
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        raise typer.Exit(
+            f"Cannot reach runner at {cfg.base_url}\n"
+            f"  ({e})\n"
+            "Usually the hostname does not resolve from this machine. Use the same host you set as PLATFORM_BASE_DOMAIN on the server (any domain or IP you control):\n"
+            "  ax login apps.example.com\n"
+            "  ax login 203.0.113.10\n"
+            "DNS: A/AAAA for that host → your server. "
+            f"Saved URL is in {CONFIG_PATH}"
+        ) from e
+
+
 @app.command()
 def generate(
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing runner-token"),
@@ -187,9 +199,9 @@ def generate(
     typer.echo("  • Non-interactive: export RUNNER_TOKEN='…' && export PLATFORM_BASE_DOMAIN='your.domain' && ./setup.sh")
     typer.echo("\nToken (copy to server or export RUNNER_TOKEN):\n")
     typer.echo(token)
-    typer.echo("\nThen on this machine (DNS: A/AAAA record runner → server IP):")
-    typer.echo("  ax login YOUR_BASE_DOMAIN")
-    typer.echo("  example: ax login example.com")
+    typer.echo("\nThen on this machine (DNS: point your runner host at the server):")
+    typer.echo("  ax login YOUR_RUNNER_HOST")
+    typer.echo("  example: ax login apps.example.com   (same value as PLATFORM_BASE_DOMAIN on the server)")
     typer.echo("  (omit --token; it reads the same file)")
 
 
@@ -198,7 +210,7 @@ def login(
     base_domain: Annotated[
         str,
         typer.Argument(
-            help="Platform base: hostname (e.g. example.com, localhost) or public IP. Hostname → https://runner.<host>; IP → http://<ip> (see Caddy /v1 on :80).",
+            help="Your runner host: same as PLATFORM_BASE_DOMAIN on the server (any hostname or public IP), e.g. apps.example.com, localhost, 203.0.113.10.",
         ),
     ],
     token: str | None = typer.Option(
@@ -208,7 +220,7 @@ def login(
         help="Bearer token; defaults to ~/.config/ax/runner-token from ax generate",
     ),
 ) -> None:
-    """Save runner API URL (derived from base domain) and token."""
+    """Save runner API URL (from hostname or IP) and token."""
     if token is None:
         token = _read_saved_runner_token()
     if not token:
@@ -266,27 +278,28 @@ def deploy(path: Path = typer.Option(Path("."), "--path")) -> None:
         data = _make_source_tar_gz(path)
         progress.update(task, description="Uploading + deploying (server build/run)...")
 
-        with _http(cfg) as client:
-            r = client.post(
+        r = _runner_call(
+            cfg,
+            lambda c: c.post(
                 "v1/deploy",
                 data={"config_json": json.dumps(payload)},
                 files={"source": ("source.tar.gz", data, "application/gzip")},
-            )
-            if r.status_code >= 400:
-                raise typer.Exit(f"Deploy failed ({r.status_code}): {r.text}")
-            progress.update(task, description="Deploy completed.")
-            typer.echo(r.text.rstrip())
+            ),
+        )
+        if r.status_code >= 400:
+            raise typer.Exit(f"Deploy failed ({r.status_code}): {r.text}")
+        progress.update(task, description="Deploy completed.")
+        typer.echo(r.text.rstrip())
 
 
 @app.command("ps")
 def ps_() -> None:
     """List apps."""
     cfg = _load_client_config()
-    with _http(cfg) as client:
-        r = client.get("v1/apps")
-        if r.status_code >= 400:
-            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
-        apps = r.json()
+    r = _runner_call(cfg, lambda c: c.get("v1/apps"))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    apps = r.json()
     for a in apps:
         doms = ",".join(a.get("domains") or [])
         ppath = a.get("platform_path") or ""
@@ -299,53 +312,48 @@ def ps_() -> None:
 def logs(name: str, tail: int = typer.Option(200, "--tail")) -> None:
     """Fetch recent logs for an app."""
     cfg = _load_client_config()
-    with _http(cfg) as client:
-        r = client.get(f"v1/apps/{name}/logs", params={"tail": tail})
-        if r.status_code >= 400:
-            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
-        typer.echo(r.text.rstrip())
+    r = _runner_call(cfg, lambda c: c.get(f"v1/apps/{name}/logs", params={"tail": tail}))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    typer.echo(r.text.rstrip())
 
 
 @app.command("rm")
 def rm_(name: str) -> None:
     """Remove a deployed app."""
     cfg = _load_client_config()
-    with _http(cfg) as client:
-        r = client.delete(f"v1/apps/{name}")
-        if r.status_code >= 400:
-            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
-        typer.echo(r.text.rstrip())
+    r = _runner_call(cfg, lambda c: c.delete(f"v1/apps/{name}"))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    typer.echo(r.text.rstrip())
 
 
 @app.command()
 def start(name: str) -> None:
     """Start a stopped app container."""
     cfg = _load_client_config()
-    with _http(cfg) as client:
-        r = client.post(f"v1/apps/{name}/start")
-        if r.status_code >= 400:
-            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
-        typer.echo(r.text.rstrip())
+    r = _runner_call(cfg, lambda c: c.post(f"v1/apps/{name}/start"))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    typer.echo(r.text.rstrip())
 
 
 @app.command()
 def stop(name: str) -> None:
     """Stop a running app container (does not remove the app)."""
     cfg = _load_client_config()
-    with _http(cfg) as client:
-        r = client.post(f"v1/apps/{name}/stop")
-        if r.status_code >= 400:
-            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
-        typer.echo(r.text.rstrip())
+    r = _runner_call(cfg, lambda c: c.post(f"v1/apps/{name}/stop"))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    typer.echo(r.text.rstrip())
 
 
 @app.command()
 def restart(name: str) -> None:
     """Restart an app container."""
     cfg = _load_client_config()
-    with _http(cfg) as client:
-        r = client.post(f"v1/apps/{name}/restart")
-        if r.status_code >= 400:
-            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
-        typer.echo(r.text.rstrip())
+    r = _runner_call(cfg, lambda c: c.post(f"v1/apps/{name}/restart"))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    typer.echo(r.text.rstrip())
 
