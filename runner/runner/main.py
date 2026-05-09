@@ -420,10 +420,6 @@ def _reconcile_caddy() -> None:
     _reload_caddy()
 
 
-if __name__ == "__main__":
-    main()
-
-
 def _format_build_logs(logs: list[dict[str, Any]]) -> str:
     chunks: list[str] = []
     for entry in logs:
@@ -446,4 +442,8 @@ def _format_build_error(e: docker.errors.BuildError) -> str:
     if details:
         return msg + "\n" + details
     return msg
+
+
+if __name__ == "__main__":
+    main()
 
