@@ -21,6 +21,7 @@ RUNNER_TOKEN = os.environ.get("RUNNER_TOKEN", "")
 CADDY_CONTAINER_NAME = os.environ.get("CADDY_CONTAINER_NAME", "agentx-caddy")
 CADDY_APPS_DIR = Path(os.environ.get("CADDY_APPS_DIR", "/etc/caddy/apps"))
 PLATFORM_BASE_DOMAIN = os.environ.get("PLATFORM_BASE_DOMAIN", "").strip()
+PLATFORM_ROUTES_DIRNAME = "platform-routes"
 
 AGENTX_NETWORK = os.environ.get("AGENTX_NETWORK", "agentx")
 APPS_ROOT = DATA_DIR / "apps"
@@ -367,11 +368,12 @@ def _reconcile_caddy() -> None:
             p.unlink()
         except FileNotFoundError:
             pass
-    platform_path_file = CADDY_APPS_DIR / "platform-path.caddy"
-    if platform_path_file.exists():
-        platform_path_file.unlink()
+    platform_routes_dir = CADDY_APPS_DIR / PLATFORM_ROUTES_DIRNAME
+    if platform_routes_dir.exists():
+        shutil.rmtree(platform_routes_dir)
+    platform_routes_dir.mkdir(parents=True, exist_ok=True)
 
-    platform_routes: list[tuple[str, str, str]] = []  # (path, container, port)
+    platform_routes: list[tuple[str, str, str, str]] = []  # (app_name, path, container, port)
 
     if APPS_ROOT.exists():
         for app_dir in sorted(APPS_ROOT.iterdir()):
@@ -393,29 +395,25 @@ def _reconcile_caddy() -> None:
                     )
             elif ing.mode == "platform-path":
                 if path:
-                    platform_routes.append((path, container, port))
+                    platform_routes.append((app_dir.name, path, container, port))
 
-    # Always write the platform host block so platform health is predictable:
-    #   https://<platform-base-domain>/_ax/health
-    if PLATFORM_BASE_DOMAIN:
-        lines: list[str] = [f"{PLATFORM_BASE_DOMAIN} {{"]  # type: ignore[list-item]
-        lines += [
-            "  handle /_ax/health {",
-            '    respond "ok" 200',
-            "  }",
-        ]
-        # Path-mode apps live under: https://<platform-base-domain>/<path>/*
-        for path, container, port in sorted(platform_routes, key=lambda x: x[0]):
-            lines += [
-                f"  handle {path}/_ax/health {{",
-                '    respond "ok" 200',
-                "  }",
-                f"  handle_path {path}/* {{",
-                f"    reverse_proxy {container}:{port}",
-                "  }",
-            ]
-        lines.append("}")
-        platform_path_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # For platform-path, we only generate route snippets (no site blocks), because
+    # the base Caddyfile already defines {$PLATFORM_BASE_DOMAIN} { ... }.
+    for app_name, path, container, port in sorted(platform_routes, key=lambda x: x[1]):
+        (platform_routes_dir / f"{app_name}.caddy").write_text(
+            "\n".join(
+                [
+                    f"handle {path}/_ax/health {{",
+                    '  respond "ok" 200',
+                    "}",
+                    f"handle_path {path}/* {{",
+                    f"  reverse_proxy {container}:{port}",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
 
     _reload_caddy()
 
