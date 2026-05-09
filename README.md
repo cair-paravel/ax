@@ -35,6 +35,9 @@ pip install -e .
 ax login http://localhost:8080 --token local-dev-token
 ax init
 ax deploy
+ax ps
+ax logs myapi --tail 300
+ax rm myapi
 ```
 
 The runner listens at `http://localhost:8080`.

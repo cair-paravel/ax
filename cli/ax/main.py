@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import typer
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -50,12 +51,15 @@ def _write_ax_toml(path: Path, name: str) -> None:
     ax_path = path / "ax.toml"
     if ax_path.exists():
         raise typer.Exit("ax.toml already exists")
+    start = 'uv run uvicorn app:app --host 0.0.0.0 --port $PORT'
+    if (path / "main.py").exists():
+        start = 'uv run uvicorn main:app --host 0.0.0.0 --port $PORT'
     ax_path.write_text(
         "\n".join(
             [
                 f'name = "{name}"',
                 'type = "web"',
-                'start = "uv run uvicorn app:app --host 0.0.0.0 --port $PORT"',
+                f'start = "{start}"',
                 "port = 8000",
                 "",
                 "[ingress]",
@@ -159,17 +163,25 @@ def deploy(path: Path = typer.Option(Path("."), "--path")) -> None:
         "env": {str(k): str(v) for k, v in env.items()},
     }
 
-    data = _make_source_tar_gz(path)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Packaging source...", total=None)
+        data = _make_source_tar_gz(path)
+        progress.update(task, description="Uploading + deploying (server build/run)...")
 
-    with _http(cfg) as client:
-        r = client.post(
-            "v1/deploy",
-            data={"config_json": json.dumps(payload)},
-            files={"source": ("source.tar.gz", data, "application/gzip")},
-        )
-        if r.status_code >= 400:
-            raise typer.Exit(f"Deploy failed ({r.status_code}): {r.text}")
-        typer.echo(r.text.rstrip())
+        with _http(cfg) as client:
+            r = client.post(
+                "v1/deploy",
+                data={"config_json": json.dumps(payload)},
+                files={"source": ("source.tar.gz", data, "application/gzip")},
+            )
+            if r.status_code >= 400:
+                raise typer.Exit(f"Deploy failed ({r.status_code}): {r.text}")
+            progress.update(task, description="Deploy completed.")
+            typer.echo(r.text.rstrip())
 
 
 @app.command("ps")
@@ -193,6 +205,17 @@ def logs(name: str, tail: int = typer.Option(200, "--tail")) -> None:
     cfg = _load_client_config()
     with _http(cfg) as client:
         r = client.get(f"v1/apps/{name}/logs", params={"tail": tail})
+        if r.status_code >= 400:
+            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+        typer.echo(r.text.rstrip())
+
+
+@app.command("rm")
+def rm_(name: str) -> None:
+    """Remove a deployed app."""
+    cfg = _load_client_config()
+    with _http(cfg) as client:
+        r = client.delete(f"v1/apps/{name}")
         if r.status_code >= 400:
             raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
         typer.echo(r.text.rstrip())

@@ -127,6 +127,35 @@ def app_logs(
         raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
 
 
+@app.delete("/v1/apps/{name}", response_class=PlainTextResponse)
+def delete_app(name: str, _: Annotated[None, Depends(require_auth)]) -> str:
+    name = _sanitize_app_name(name)
+    container = f"ax-{name}"
+
+    # Remove container (if present)
+    try:
+        if _container_exists(container):
+            DOCKER.containers.get(container).remove(force=True)
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
+
+    # Remove stored app config
+    app_dir = APPS_ROOT / name
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+
+    # Remove custom-domain/subdomain caddy file if present
+    try:
+        p = CADDY_APPS_DIR / f"app-{name}.caddy"
+        if p.exists():
+            p.unlink()
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Filesystem error: {e}") from e
+
+    _reconcile_caddy()
+    return f"removed: {name}\n"
+
+
 @app.post("/v1/deploy", response_class=PlainTextResponse)
 async def deploy(
     _: Annotated[None, Depends(require_auth)],
