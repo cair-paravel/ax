@@ -11,6 +11,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "python-multipart>=0.0.9",
   "pydantic>=2.7",
+  "docker>=7.0",
 ]
 
 [project.scripts]

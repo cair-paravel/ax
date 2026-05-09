@@ -5,12 +5,12 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import docker
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -26,6 +26,7 @@ AGENTX_NETWORK = os.environ.get("AGENTX_NETWORK", "agentx")
 APPS_ROOT = DATA_DIR / "apps"
 BUILDS_ROOT = DATA_DIR / "builds"
 
+DOCKER = docker.from_env()
 
 def _require_token(authorization: str | None) -> None:
     if not RUNNER_TOKEN:
@@ -39,19 +40,6 @@ def _require_token(authorization: str | None) -> None:
 
 def require_auth(request: Request) -> None:
     _require_token(request.headers.get("authorization"))
-
-
-def _run(cmd: list[str], *, cwd: Path | None = None) -> str:
-    p = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    if p.returncode != 0:
-        raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(cmd)}\n{p.stdout}")
-    return p.stdout
 
 
 def _sanitize_app_name(name: str) -> str:
@@ -131,9 +119,11 @@ def app_logs(
     if not _container_exists(container):
         raise HTTPException(status_code=404, detail="Container not found")
     try:
-        return _run(["docker", "logs", "--tail", str(tail), container])
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        c = DOCKER.containers.get(container)
+        out = c.logs(tail=tail)
+        return out.decode("utf-8", errors="replace")
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
 
 
 @app.post("/v1/deploy", response_class=PlainTextResponse)
@@ -173,19 +163,32 @@ async def deploy(
     if not pyproject.exists():
         raise HTTPException(status_code=400, detail="Missing pyproject.toml at repo root (MVP expects repo-root pyproject)")
 
-    dockerfile = build_dir / "Dockerfile"
+    # Docker requires the Dockerfile to be within the build context.
+    dockerfile_name = "Dockerfile.agentx"
+    dockerfile = src_dir / dockerfile_name
     dockerfile.write_text(_dockerfile_template(cfg), encoding="utf-8")
 
     image_tag = f"agentx/{name}:{build_id}"
 
-    # Build image
-    build_out = _run(
-        ["docker", "build", "-t", image_tag, "-f", str(dockerfile), str(src_dir)],
-        cwd=build_dir,
-    )
+    try:
+        image, logs = DOCKER.images.build(
+            path=str(src_dir),
+            dockerfile=dockerfile_name,
+            tag=image_tag,
+            rm=True,
+        )
+        build_out = _format_build_logs(logs)
+    except docker.errors.BuildError as e:
+        raise HTTPException(status_code=500, detail=_format_build_error(e)) from e
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
 
     # Stop & remove existing container if present
-    _run(["docker", "rm", "-f", f"ax-{name}"], cwd=build_dir) if _container_exists(f"ax-{name}") else None
+    try:
+        if _container_exists(f"ax-{name}"):
+            DOCKER.containers.get(f"ax-{name}").remove(force=True)
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
 
     # Run container
     env_args: list[str] = []
@@ -196,20 +199,18 @@ async def deploy(
     internal_port = str(cfg.port or 8000)
     env_args += ["-e", f"PORT={internal_port}"]
 
-    run_cmd = [
-        "docker",
-        "run",
-        "-d",
-        "--name",
-        f"ax-{name}",
-        "--restart",
-        "unless-stopped",
-        "--network",
-        AGENTX_NETWORK,
-        *env_args,
-        image_tag,
-    ]
-    run_out = _run(run_cmd, cwd=build_dir)
+    try:
+        c = DOCKER.containers.run(
+            image=image_tag,
+            detach=True,
+            name=f"ax-{name}",
+            network=AGENTX_NETWORK,
+            environment={**cfg.env, "PORT": internal_port},
+            restart_policy={"Name": "unless-stopped"},
+        )
+        run_out = c.id
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
 
     # Persist last deploy metadata
     (app_dir / "last_deploy.txt").write_text(build_id, encoding="utf-8")
@@ -274,8 +275,13 @@ def _caddy_site(domains: list[str], container_name: str, port: str) -> str:
 
 
 def _container_exists(name: str) -> bool:
-    p = subprocess.run(["docker", "inspect", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return p.returncode == 0
+    try:
+        DOCKER.containers.get(name)
+        return True
+    except docker.errors.NotFound:
+        return False
+    except docker.errors.DockerException:
+        return False
 
 
 def _read_app_config(name: str) -> DeployConfig | None:
@@ -289,20 +295,25 @@ def _read_app_config(name: str) -> DeployConfig | None:
 
 
 def _reload_caddy() -> None:
-    # Reload by exec'ing inside the Caddy container. Runner has docker socket access.
-    _run(
-        [
-            "docker",
-            "exec",
-            CADDY_CONTAINER_NAME,
-            "caddy",
-            "reload",
-            "--config",
-            "/etc/caddy/Caddyfile",
-            "--adapter",
-            "caddyfile",
-        ]
-    )
+    try:
+        caddy = DOCKER.containers.get(CADDY_CONTAINER_NAME)
+        res = caddy.exec_run(
+            [
+                "caddy",
+                "reload",
+                "--config",
+                "/etc/caddy/Caddyfile",
+                "--adapter",
+                "caddyfile",
+            ],
+            stdout=True,
+            stderr=True,
+        )
+        if res.exit_code != 0:
+            out = (res.output or b"").decode("utf-8", errors="replace")
+            raise RuntimeError(f"caddy reload failed: {out}")
+    except docker.errors.DockerException as e:
+        raise RuntimeError(f"Docker error reloading caddy: {e}") from e
 
 
 def main() -> None:
@@ -411,4 +422,28 @@ def _reconcile_caddy() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _format_build_logs(logs: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+    for entry in logs:
+        if "stream" in entry and entry["stream"]:
+            chunks.append(str(entry["stream"]))
+        elif "status" in entry and entry["status"]:
+            chunks.append(str(entry["status"]) + ("\n" if not str(entry["status"]).endswith("\n") else ""))
+        elif "error" in entry and entry["error"]:
+            chunks.append(str(entry["error"]) + ("\n" if not str(entry["error"]).endswith("\n") else ""))
+    return "".join(chunks).strip()
+
+
+def _format_build_error(e: docker.errors.BuildError) -> str:
+    details = ""
+    try:
+        details = _format_build_logs(list(e.build_log or []))  # type: ignore[arg-type]
+    except Exception:
+        details = ""
+    msg = str(e)
+    if details:
+        return msg + "\n" + details
+    return msg
 
