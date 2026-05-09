@@ -1,9 +1,0 @@
-pyproject.toml
-ax/__init__.py
-ax/main.py
-ax.egg-info/PKG-INFO
-ax.egg-info/SOURCES.txt
-ax.egg-info/dependency_links.txt
-ax.egg-info/entry_points.txt
-ax.egg-info/requires.txt
-ax.egg-info/top_level.txt
