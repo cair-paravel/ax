@@ -368,6 +368,10 @@ def _reconcile_caddy() -> None:
             p.unlink()
         except FileNotFoundError:
             pass
+    # Cleanup from older versions.
+    legacy = CADDY_APPS_DIR / "platform-path.caddy"
+    if legacy.exists():
+        legacy.unlink()
     platform_routes_dir = CADDY_APPS_DIR / PLATFORM_ROUTES_DIRNAME
     if platform_routes_dir.exists():
         shutil.rmtree(platform_routes_dir)

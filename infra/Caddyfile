@@ -20,5 +20,6 @@
 	import /etc/caddy/apps/platform-routes/*.caddy
 }
 
-import /etc/caddy/apps/*.caddy
+# Custom-domain / platform-subdomain apps are generated here.
+import /etc/caddy/apps/app-*.caddy
 
