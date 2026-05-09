@@ -1,0 +1,13 @@
+{
+	# For local dev you may hit rate limits if you keep restarting.
+	# Uncomment to use Let's Encrypt staging:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	admin 0.0.0.0:2019
+}
+
+:80 {
+	respond "agentx up" 200
+}
+
+import /etc/caddy/apps/*.caddy
+

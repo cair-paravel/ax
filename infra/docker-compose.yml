@@ -1,0 +1,46 @@
+services:
+  caddy:
+    image: caddy:2
+    container_name: agentx-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2019:2019"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_apps:/etc/caddy/apps
+    networks:
+      - agentx
+
+  runner:
+    build:
+      context: ../runner
+    container_name: agentx-runner
+    restart: unless-stopped
+    environment:
+      - RUNNER_TOKEN=local-dev-token
+      - RUNNER_DATA_DIR=/data
+      - CADDY_CONTAINER_NAME=agentx-caddy
+      - CADDY_APPS_DIR=/etc/caddy/apps
+    volumes:
+      - runner_data:/data
+      - caddy_apps:/etc/caddy/apps
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - agentx
+    ports:
+      - "8080:8080"
+
+volumes:
+  runner_data:
+  caddy_data:
+  caddy_config:
+  caddy_apps:
+
+networks:
+  agentx:
+    name: agentx
+
