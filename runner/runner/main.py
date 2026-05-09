@@ -9,7 +9,7 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse
@@ -20,6 +20,7 @@ DATA_DIR = Path(os.environ.get("RUNNER_DATA_DIR", "/data")).resolve()
 RUNNER_TOKEN = os.environ.get("RUNNER_TOKEN", "")
 CADDY_CONTAINER_NAME = os.environ.get("CADDY_CONTAINER_NAME", "agentx-caddy")
 CADDY_APPS_DIR = Path(os.environ.get("CADDY_APPS_DIR", "/etc/caddy/apps"))
+PLATFORM_BASE_DOMAIN = os.environ.get("PLATFORM_BASE_DOMAIN", "").strip()
 
 AGENTX_NETWORK = os.environ.get("AGENTX_NETWORK", "agentx")
 APPS_ROOT = DATA_DIR / "apps"
@@ -65,8 +66,17 @@ class DeployConfig(BaseModel):
     type: str = Field(default="web")  # web|worker|job (MVP treats all as container)
     start: str
     port: int | None = None
+    # Back-compat: older configs used top-level domains.
     domains: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    ingress: dict[str, Any] | None = None
+
+
+class IngressSpec(BaseModel):
+    mode: Literal["custom-domain", "platform-subdomain", "platform-path"] = "custom-domain"
+    domains: list[str] = Field(default_factory=list)  # for custom-domain
+    subdomain: str | None = None  # for platform-subdomain
+    path: str | None = None  # for platform-path, like "/myapi"
 
 
 class AppSummary(BaseModel):
@@ -75,6 +85,7 @@ class AppSummary(BaseModel):
     type: str = "web"
     port: int | None = None
     domains: list[str] = Field(default_factory=list)
+    platform_path: str | None = None
 
 
 app = FastAPI(title="agentx-runner", version="0.1.0")
@@ -102,7 +113,8 @@ def list_apps(_: Annotated[None, Depends(require_auth)]) -> list[AppSummary]:
                 last_deploy=last_deploy,
                 type=cfg.type if cfg else "web",
                 port=cfg.port if cfg else None,
-                domains=cfg.domains if cfg else [],
+                domains=_effective_domains(cfg)[0] if cfg else [],
+                platform_path=_effective_domains(cfg)[1] if cfg else None,
             )
         )
     return out
@@ -209,11 +221,14 @@ async def deploy(
     (app_dir / "last_deploy.txt").write_text(build_id, encoding="utf-8")
     (app_dir / "config.json").write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
 
+    _reconcile_caddy()
+
     return "\n".join(
         [
             f"built: {image_tag}",
             f"container: ax-{name}",
-            f"domains: {', '.join(cfg.domains) if cfg.domains else '(none)'}",
+            f"domains: {', '.join(_effective_domains(cfg)[0]) if _effective_domains(cfg)[0] else '(none)'}",
+            f"platform path: {_effective_domains(cfg)[1] or '(none)'}",
             "",
             "build output:",
             build_out.strip(),
@@ -253,9 +268,12 @@ CMD ["bash", "-lc", "{start}"]
 """
 
 
-def _caddy_snippet(domains: list[str], container_name: str, port: str) -> str:
+def _caddy_site(domains: list[str], container_name: str, port: str) -> str:
     doms = " ".join(domains)
     return f"""{doms} {{
+  handle /_ax/health {{
+    respond "ok" 200
+  }}
   reverse_proxy {container_name}:{port}
 }}
 """
@@ -306,4 +324,93 @@ def _safe_extract(tf: tarfile.TarFile, dest_dir: Path) -> None:
         if not str(member_path).startswith(str(dest_dir) + os.sep):
             raise ValueError(f"Blocked path traversal in tar entry: {member.name}")
     tf.extractall(path=dest_dir)
+
+
+def _effective_ingress(cfg: DeployConfig) -> IngressSpec:
+    if cfg.ingress is not None:
+        return IngressSpec.model_validate(cfg.ingress)
+    # back-compat: treat top-level domains as custom-domain
+    return IngressSpec(mode="custom-domain", domains=list(cfg.domains))
+
+
+def _effective_domains(cfg: DeployConfig | None) -> tuple[list[str], str | None]:
+    if cfg is None:
+        return ([], None)
+    ing = _effective_ingress(cfg)
+    if ing.mode == "custom-domain":
+        return (list(ing.domains), None)
+    if ing.mode == "platform-subdomain":
+        if not PLATFORM_BASE_DOMAIN:
+            raise HTTPException(status_code=500, detail="PLATFORM_BASE_DOMAIN not set for platform-subdomain ingress")
+        if not ing.subdomain:
+            raise HTTPException(status_code=400, detail="ingress.subdomain required for platform-subdomain")
+        return ([f"{ing.subdomain}.{PLATFORM_BASE_DOMAIN}"], None)
+    if ing.mode == "platform-path":
+        if not PLATFORM_BASE_DOMAIN:
+            raise HTTPException(status_code=500, detail="PLATFORM_BASE_DOMAIN not set for platform-path ingress")
+        if not ing.path or not ing.path.startswith("/"):
+            raise HTTPException(status_code=400, detail="ingress.path must start with '/' for platform-path")
+        return ([PLATFORM_BASE_DOMAIN], ing.path.rstrip("/"))
+    return ([], None)
+
+
+def _reconcile_caddy() -> None:
+    CADDY_APPS_DIR.mkdir(parents=True, exist_ok=True)
+    # Clean known generated files
+    for p in CADDY_APPS_DIR.glob("app-*.caddy"):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+    platform_path_file = CADDY_APPS_DIR / "platform-path.caddy"
+    if platform_path_file.exists():
+        platform_path_file.unlink()
+
+    platform_routes: list[tuple[str, str, str]] = []  # (path, container, port)
+
+    if APPS_ROOT.exists():
+        for app_dir in sorted(APPS_ROOT.iterdir()):
+            if not app_dir.is_dir():
+                continue
+            cfg = _read_app_config(app_dir.name)
+            if cfg is None:
+                continue
+            domains, path = _effective_domains(cfg)
+            container = f"ax-{app_dir.name}"
+            port = str(cfg.port or 8000)
+
+            ing = _effective_ingress(cfg)
+            if ing.mode in ("custom-domain", "platform-subdomain"):
+                if domains:
+                    (CADDY_APPS_DIR / f"app-{app_dir.name}.caddy").write_text(
+                        _caddy_site(domains, container, port),
+                        encoding="utf-8",
+                    )
+            elif ing.mode == "platform-path":
+                if path:
+                    platform_routes.append((path, container, port))
+
+    # Always write the platform host block so platform health is predictable:
+    #   https://<platform-base-domain>/_ax/health
+    if PLATFORM_BASE_DOMAIN:
+        lines: list[str] = [f"{PLATFORM_BASE_DOMAIN} {{"]  # type: ignore[list-item]
+        lines += [
+            "  handle /_ax/health {",
+            '    respond "ok" 200',
+            "  }",
+        ]
+        # Path-mode apps live under: https://<platform-base-domain>/<path>/*
+        for path, container, port in sorted(platform_routes, key=lambda x: x[0]):
+            lines += [
+                f"  handle {path}/_ax/health {{",
+                '    respond "ok" 200',
+                "  }",
+                f"  handle_path {path}/* {{",
+                f"    reverse_proxy {container}:{port}",
+                "  }",
+            ]
+        lines.append("}")
+        platform_path_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    _reload_caddy()
 

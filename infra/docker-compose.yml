@@ -3,6 +3,8 @@ services:
     image: caddy:2
     container_name: agentx-caddy
     restart: unless-stopped
+    environment:
+      - PLATFORM_BASE_DOMAIN=localhost
     ports:
       - "80:80"
       - "443:443"
@@ -25,6 +27,7 @@ services:
       - RUNNER_DATA_DIR=/data
       - CADDY_CONTAINER_NAME=agentx-caddy
       - CADDY_APPS_DIR=/etc/caddy/apps
+      - PLATFORM_BASE_DOMAIN=localhost
     volumes:
       - runner_data:/data
       - caddy_apps:/etc/caddy/apps

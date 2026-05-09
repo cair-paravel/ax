@@ -62,7 +62,17 @@ name = "myapi"
 type = "web"
 start = "uv run uvicorn myapi.app:app --host 0.0.0.0 --port $PORT"
 port = 8000
-domains = ["myapi.apps.yourdomain.com", "api.example.com"]
+
+[ingress]
+# Choose one:
+# mode = "platform-path"         # https://<platform-base-domain>/myapi/*
+# path = "/myapi"
+#
+# mode = "platform-subdomain"    # https://myapi.<platform-base-domain>/*
+# subdomain = "myapi"
+#
+# mode = "custom-domain"         # https://api.example.com/*
+# domains = ["api.example.com"]
 
 [env]
 ENV = "prod"

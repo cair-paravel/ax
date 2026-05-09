@@ -57,7 +57,10 @@ def _write_ax_toml(path: Path, name: str) -> None:
                 'type = "web"',
                 'start = "uv run uvicorn app:app --host 0.0.0.0 --port $PORT"',
                 "port = 8000",
-                'domains = ["' + f"{name}.apps.yourdomain.com" + '"]',
+                "",
+                "[ingress]",
+                'mode = "platform-path"',
+                f'path = "/{name}"',
                 "",
                 "[env]",
                 'ENV = "prod"',
@@ -141,12 +144,18 @@ def deploy(path: Path = typer.Option(Path("."), "--path")) -> None:
     if not isinstance(env, dict):
         raise typer.Exit("[env] must be a table")
 
+    ingress = ax.get("ingress")
+    if ingress is not None and not isinstance(ingress, dict):
+        raise typer.Exit("[ingress] must be a table")
+
     payload = {
         "name": ax["name"],
         "type": ax.get("type", "web"),
         "start": ax["start"],
         "port": ax.get("port"),
+        # back-compat: allow top-level `domains = [...]`
         "domains": ax.get("domains", []),
+        "ingress": ingress,
         "env": {str(k): str(v) for k, v in env.items()},
     }
 
@@ -173,7 +182,9 @@ def ps_() -> None:
             raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
         apps = r.json()
     for a in apps:
-        typer.echo(f"{a['name']}\t{a.get('last_deploy')}\t{','.join(a.get('domains') or [])}")
+        doms = ",".join(a.get("domains") or [])
+        ppath = a.get("platform_path") or ""
+        typer.echo(f"{a['name']}\t{a.get('last_deploy')}\t{doms}\t{ppath}")
 
 
 @app.command()
