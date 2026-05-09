@@ -39,7 +39,7 @@ if [[ -z "$PLATFORM_BASE_DOMAIN" ]]; then
   if [[ ! -t 0 ]]; then
     die "PLATFORM_BASE_DOMAIN is not set and stdin is not a TTY. Export it or create ${ENV_FILE}."
   fi
-  read -r -p "Platform base (hostname e.g. sixty.to, or IPv4 — no https://): " PLATFORM_BASE_DOMAIN
+  read -r -p "Platform base (hostname e.g. example.com, or IPv4 — no https://): " PLATFORM_BASE_DOMAIN
 fi
 
 if [[ -z "$RUNNER_TOKEN" ]]; then

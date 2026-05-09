@@ -189,7 +189,7 @@ def generate(
     typer.echo(token)
     typer.echo("\nThen on this machine (DNS: A/AAAA record runner → server IP):")
     typer.echo("  ax login YOUR_BASE_DOMAIN")
-    typer.echo("  example: ax login sixty.to")
+    typer.echo("  example: ax login example.com")
     typer.echo("  (omit --token; it reads the same file)")
 
 
@@ -198,7 +198,7 @@ def login(
     base_domain: Annotated[
         str,
         typer.Argument(
-            help="Platform base: hostname (e.g. sixty.to, localhost) or public IP. Hostname → https://runner.<host>; IP → http://<ip> (see Caddy /v1 on :80).",
+            help="Platform base: hostname (e.g. example.com, localhost) or public IP. Hostname → https://runner.<host>; IP → http://<ip> (see Caddy /v1 on :80).",
         ),
     ],
     token: str | None = typer.Option(

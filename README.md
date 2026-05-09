@@ -76,7 +76,7 @@ cd ax
 ./setup.sh
 ```
 
-3. **DNS:** add **`runner`** as an **A** (and **AAAA** if you use IPv6) record to the **same** IP as your apex (e.g. `runner.sixty.to` → server).
+3. **DNS:** add **`runner`** as an **A** (and **AAAA** if you use IPv6) record to the **same** IP as your apex (e.g. `runner.example.com` → server).
 
 4. On your laptop (token is read automatically from `~/.config/ax/runner-token` when you omit `--token`):
 
@@ -84,7 +84,7 @@ cd ax
 ax login <base-domain>
 ```
 
-Examples: `ax login sixty.to` → `https://runner.sixty.to` · `ax login 49.12.245.83` → `http://49.12.245.83`
+Examples: `ax login example.com` → `https://runner.example.com` · `ax login 49.12.245.83` → `http://49.12.245.83`
 
 5. Deploy apps with `ax init` / `ax deploy` as usual.
 
@@ -100,7 +100,7 @@ The setup script writes **`infra/.env`** (`PLATFORM_BASE_DOMAIN`, `RUNNER_TOKEN`
 **Non-interactive** (e.g. cloud-init) — use the token from `ax generate` (or any secret):
 
 ```bash
-export PLATFORM_BASE_DOMAIN=sixty.to
+export PLATFORM_BASE_DOMAIN=example.com
 export RUNNER_TOKEN='<same token as ax generate>'
 ./setup.sh
 ```
@@ -111,11 +111,11 @@ Or copy `infra/.env.example` → `infra/.env`, edit values, then:
 docker compose -f infra/docker-compose.yml up --build -d
 ```
 
-You can still pass an explicit token: `ax login sixty.to --token …`
+You can still pass an explicit token: `ax login example.com --token …`
 
 #### Base domain
 
-Set `PLATFORM_BASE_DOMAIN` in **`infra/.env`** (or via the setup script): a **hostname** (e.g. `sixty.to`) or a **public IPv4** (no `https://`). Caddy serves:
+Set `PLATFORM_BASE_DOMAIN` in **`infra/.env`** (or via the setup script): a **hostname** (e.g. `example.com`) or a **public IPv4** (no `https://`). Caddy serves:
 
 - **`https://<hostname>`** — platform apps + `/_ax/health` (TLS may not work for a raw IP apex)
 - **`https://runner.<hostname>`** — runner API for the CLI when DNS has `runner` → server
