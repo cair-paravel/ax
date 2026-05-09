@@ -211,12 +211,6 @@ async def deploy(
     ]
     run_out = _run(run_cmd, cwd=build_dir)
 
-    # Write Caddy snippet if domains exist
-    if cfg.domains:
-        snippet_path = CADDY_APPS_DIR / f"{name}.caddy"
-        snippet_path.write_text(_caddy_snippet(cfg.domains, f"ax-{name}", internal_port), encoding="utf-8")
-        _reload_caddy()
-
     # Persist last deploy metadata
     (app_dir / "last_deploy.txt").write_text(build_id, encoding="utf-8")
     (app_dir / "config.json").write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
