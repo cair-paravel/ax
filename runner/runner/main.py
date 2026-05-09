@@ -75,6 +75,7 @@ class AppSummary(BaseModel):
     port: int | None = None
     domains: list[str] = Field(default_factory=list)
     platform_path: str | None = None
+    running: bool | None = None
 
 
 app = FastAPI(title="ax-runner", version="0.1.0")
@@ -96,6 +97,14 @@ def list_apps(_: Annotated[None, Depends(require_auth)]) -> list[AppSummary]:
         name = p.name
         cfg = _read_app_config(name)
         last_deploy = (p / "last_deploy.txt").read_text(encoding="utf-8").strip() if (p / "last_deploy.txt").exists() else None
+        cname = f"ax-{name}"
+        running: bool | None = None
+        if _container_exists(cname):
+            try:
+                st = DOCKER.containers.get(cname).attrs.get("State", {})
+                running = bool(st.get("Running"))
+            except docker.errors.DockerException:
+                running = None
         out.append(
             AppSummary(
                 name=name,
@@ -104,6 +113,7 @@ def list_apps(_: Annotated[None, Depends(require_auth)]) -> list[AppSummary]:
                 port=cfg.port if cfg else None,
                 domains=_effective_domains(cfg)[0] if cfg else [],
                 platform_path=_effective_domains(cfg)[1] if cfg else None,
+                running=running,
             )
         )
     return out
@@ -154,6 +164,51 @@ def delete_app(name: str, _: Annotated[None, Depends(require_auth)]) -> str:
 
     _reconcile_caddy()
     return f"removed: {name}\n"
+
+
+@app.post("/v1/apps/{name}/stop", response_class=PlainTextResponse)
+def app_stop(name: str, _: Annotated[None, Depends(require_auth)]) -> str:
+    name = _sanitize_app_name(name)
+    container = f"ax-{name}"
+    if not _container_exists(container):
+        raise HTTPException(status_code=404, detail="Container not found")
+    try:
+        c = DOCKER.containers.get(container)
+        c.stop(timeout=10)
+        return f"stopped: {name}\n"
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
+
+
+@app.post("/v1/apps/{name}/start", response_class=PlainTextResponse)
+def app_start(name: str, _: Annotated[None, Depends(require_auth)]) -> str:
+    name = _sanitize_app_name(name)
+    container = f"ax-{name}"
+    if not _container_exists(container):
+        raise HTTPException(status_code=404, detail="Container not found (deploy first)")
+    try:
+        c = DOCKER.containers.get(container)
+        st = c.attrs.get("State", {})
+        if st.get("Running"):
+            return f"already running: {name}\n"
+        c.start()
+        return f"started: {name}\n"
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
+
+
+@app.post("/v1/apps/{name}/restart", response_class=PlainTextResponse)
+def app_restart(name: str, _: Annotated[None, Depends(require_auth)]) -> str:
+    name = _sanitize_app_name(name)
+    container = f"ax-{name}"
+    if not _container_exists(container):
+        raise HTTPException(status_code=404, detail="Container not found")
+    try:
+        c = DOCKER.containers.get(container)
+        c.restart(timeout=10)
+        return f"restarted: {name}\n"
+    except docker.errors.DockerException as e:
+        raise HTTPException(status_code=500, detail=f"Docker error: {e}") from e
 
 
 @app.post("/v1/deploy", response_class=PlainTextResponse)

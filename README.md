@@ -46,6 +46,9 @@ ax login localhost --token local-dev-token
 ax init
 ax deploy
 ax ps
+ax start myapi
+ax stop myapi
+ax restart myapi
 ax logs myapi --tail 300
 ax rm myapi
 ```

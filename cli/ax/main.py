@@ -290,7 +290,9 @@ def ps_() -> None:
     for a in apps:
         doms = ",".join(a.get("domains") or [])
         ppath = a.get("platform_path") or ""
-        typer.echo(f"{a['name']}\t{a.get('last_deploy')}\t{doms}\t{ppath}")
+        run = a.get("running")
+        run_s = "?" if run is None else ("up" if run else "down")
+        typer.echo(f"{a['name']}\t{run_s}\t{a.get('last_deploy')}\t{doms}\t{ppath}")
 
 
 @app.command()
@@ -310,6 +312,39 @@ def rm_(name: str) -> None:
     cfg = _load_client_config()
     with _http(cfg) as client:
         r = client.delete(f"v1/apps/{name}")
+        if r.status_code >= 400:
+            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+        typer.echo(r.text.rstrip())
+
+
+@app.command()
+def start(name: str) -> None:
+    """Start a stopped app container."""
+    cfg = _load_client_config()
+    with _http(cfg) as client:
+        r = client.post(f"v1/apps/{name}/start")
+        if r.status_code >= 400:
+            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+        typer.echo(r.text.rstrip())
+
+
+@app.command()
+def stop(name: str) -> None:
+    """Stop a running app container (does not remove the app)."""
+    cfg = _load_client_config()
+    with _http(cfg) as client:
+        r = client.post(f"v1/apps/{name}/stop")
+        if r.status_code >= 400:
+            raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+        typer.echo(r.text.rstrip())
+
+
+@app.command()
+def restart(name: str) -> None:
+    """Restart an app container."""
+    cfg = _load_client_config()
+    with _http(cfg) as client:
+        r = client.post(f"v1/apps/{name}/restart")
         if r.status_code >= 400:
             raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
         typer.echo(r.text.rstrip())
