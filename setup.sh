@@ -39,6 +39,7 @@ fi
 require_cmd uv
 require_cmd caddy
 require_cmd systemctl
+UV_BIN="$(command -v uv)"
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a
@@ -133,6 +134,7 @@ CADDY_APPS_DIR=/etc/caddy/apps
 CADDY_CONFIG=/etc/caddy/Caddyfile
 SYSTEMD_DIR=/etc/systemd/system
 UV_CACHE_DIR=/var/cache/ax/uv
+UV_BIN=${UV_BIN}
 EOF
 
 echo "synching runner environment..."
