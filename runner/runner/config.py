@@ -10,6 +10,7 @@ CADDY_APPS_DIR = Path(os.environ.get("CADDY_APPS_DIR", "/etc/caddy/apps"))
 CADDY_CONFIG = Path(os.environ.get("CADDY_CONFIG", "/etc/caddy/Caddyfile"))
 SYSTEMD_DIR = Path(os.environ.get("SYSTEMD_DIR", "/etc/systemd/system"))
 UV_CACHE_DIR = Path(os.environ.get("UV_CACHE_DIR", "/var/cache/ax/uv")).resolve()
+UV_PYTHON_INSTALL_DIR = Path(os.environ.get("UV_PYTHON_INSTALL_DIR", "/var/lib/ax/python")).resolve()
 UV_BIN = os.environ.get("UV_BIN", "uv")
 PLATFORM_BASE_DOMAIN = os.environ.get("PLATFORM_BASE_DOMAIN", "").strip()
 PLATFORM_ROUTES_DIRNAME = "platform-routes"

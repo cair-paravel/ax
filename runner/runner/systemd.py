@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from runner.commands import systemctl
-from runner.config import SYSTEMD_DIR, UV_CACHE_DIR
+from runner.config import SYSTEMD_DIR, UV_CACHE_DIR, UV_PYTHON_INSTALL_DIR
 from runner.models import DeployConfig
 
 
@@ -35,6 +35,8 @@ def write_systemd_unit(name: str, cfg: DeployConfig, src_dir: Path, port: int) -
             _systemd_env("PORT", str(port)),
             _systemd_env("UV_CACHE_DIR", str(UV_CACHE_DIR)),
             _systemd_env("UV_PROJECT_ENVIRONMENT", str(src_dir / ".venv")),
+            _systemd_env("UV_PYTHON_INSTALL_DIR", str(UV_PYTHON_INSTALL_DIR)),
+            _systemd_env("VIRTUAL_ENV", str(src_dir / ".venv")),
             _systemd_env("PATH", f"{src_dir / '.venv' / 'bin'}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
         ]
     )
@@ -57,7 +59,7 @@ def write_systemd_unit(name: str, cfg: DeployConfig, src_dir: Path, port: int) -
                 "Type=simple",
                 f"WorkingDirectory={src_dir}",
                 *env_lines,
-                f"ExecStart=/bin/bash -lc {json.dumps('exec ' + cfg.start)}",
+                f"ExecStart=/bin/bash -c {json.dumps('exec ' + cfg.start)}",
                 "Restart=always",
                 "RestartSec=2",
                 "NoNewPrivileges=yes",

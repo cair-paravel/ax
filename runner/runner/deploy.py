@@ -11,7 +11,7 @@ from runner.apps import existing_or_allocate_port, write_app_metadata, write_cur
 from runner.archive import safe_extract
 from runner.caddy import reconcile_caddy
 from runner.commands import run, systemctl
-from runner.config import APPS_ROOT, CADDY_APPS_DIR, UV_CACHE_DIR, UV_BIN
+from runner.config import APPS_ROOT, CADDY_APPS_DIR, UV_CACHE_DIR, UV_BIN, UV_PYTHON_INSTALL_DIR
 from runner.ingress import effective_domains
 from runner.models import DeployConfig
 from runner.systemd import unit_name, write_systemd_unit
@@ -24,6 +24,7 @@ async def deploy_source(cfg: DeployConfig, source: UploadFile, name: str) -> str
     APPS_ROOT.mkdir(parents=True, exist_ok=True)
     CADDY_APPS_DIR.mkdir(parents=True, exist_ok=True)
     UV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    UV_PYTHON_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
 
     app_dir = APPS_ROOT / name
     releases_dir = app_dir / "releases"
@@ -47,7 +48,13 @@ async def deploy_source(cfg: DeployConfig, source: UploadFile, name: str) -> str
         raise HTTPException(status_code=400, detail="Missing pyproject.toml at repo root")
 
     port = existing_or_allocate_port(name)
-    env = {**cfg.env, "PORT": str(port), "UV_CACHE_DIR": str(UV_CACHE_DIR), "UV_PROJECT_ENVIRONMENT": str(src_dir / ".venv")}
+    env = {
+        **cfg.env,
+        "PORT": str(port),
+        "UV_CACHE_DIR": str(UV_CACHE_DIR),
+        "UV_PROJECT_ENVIRONMENT": str(src_dir / ".venv"),
+        "UV_PYTHON_INSTALL_DIR": str(UV_PYTHON_INSTALL_DIR),
+    }
 
     sync_cmd = [UV_BIN, "sync", "--project", str(src_dir)]
     if (src_dir / "uv.lock").exists():

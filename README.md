@@ -94,6 +94,25 @@ For `localhost` and raw IPs the CLI uses `http://`; for normal hostnames it uses
 
 ### `ax.toml`
 
+`ax.toml` is the app manifest. It tells `ax` what to run, how to route it, and what resource limits to apply.
+
+Top-level fields:
+
+```toml
+name = "myapi"   # app name, becomes the systemd unit/app identity
+type = "web"     # metadata for now
+start = "uvicorn app:app --host 127.0.0.1 --port $PORT"
+port = 8000      # compatibility field; runtime allocates the actual localhost port
+```
+
+Sections:
+
+```toml
+[ingress]   # how Caddy should expose the app
+[runtime]   # host-process runtime settings
+[env]       # environment variables injected into the service
+```
+
 Minimal web app:
 
 ```toml
@@ -116,7 +135,17 @@ cpu = "1"
 ENV = "prod"
 ```
 
+`start` should be the app command, not an environment-management command.
+The runner starts it with the release venv active by setting `VIRTUAL_ENV` and putting `.venv/bin` first on `PATH`.
+For web apps, bind to `127.0.0.1` and use `$PORT`.
 `port` is kept for app compatibility, but the process runtime allocates a private localhost port per app and exposes it as `$PORT`.
+
+The `[runtime]` section currently supports:
+
+- `backend = "process"`: the only supported backend right now
+- `python = "3.12"`: interpreter version for `uv sync`
+- `memory = "512M"`: systemd `MemoryMax`
+- `cpu = "1"`: systemd `CPUQuota`, where `1` means one full core
 
 Ingress modes:
 

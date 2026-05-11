@@ -118,7 +118,7 @@ PLATFORM_BASE_DOMAIN="${PLATFORM_BASE_DOMAIN%/}"
 install -d -m 700 /etc/ax
 install -d -m 755 /etc/caddy/apps/platform-routes
 install -d -m 755 "$CADDY_DROPIN_DIR"
-install -d -m 755 /var/lib/ax/apps /var/cache/ax/uv
+install -d -m 755 /var/lib/ax/apps /var/lib/ax/python /var/cache/ax/uv
 
 umask 077
 cat >"$ENV_FILE" <<EOF
@@ -134,6 +134,7 @@ CADDY_APPS_DIR=/etc/caddy/apps
 CADDY_CONFIG=/etc/caddy/Caddyfile
 SYSTEMD_DIR=/etc/systemd/system
 UV_CACHE_DIR=/var/cache/ax/uv
+UV_PYTHON_INSTALL_DIR=/var/lib/ax/python
 UV_BIN=${UV_BIN}
 EOF
 
