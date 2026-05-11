@@ -79,6 +79,7 @@ On your laptop:
 
 ```bash
 ax login apps.example.com
+ax health
 ax init
 ax deploy
 ax ps

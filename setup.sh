@@ -170,10 +170,11 @@ systemctl enable --now ax-runner
 systemctl restart ax-runner
 
 echo ""
-echo "Health checks:"
-echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/_ax/health"
-echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/health"
-echo "  (IP-only base: use http://${PLATFORM_BASE_DOMAIN}/health on :80)"
+echo "Health check from your laptop:"
+echo "  ax health"
+echo "Server checks:"
+echo "  systemctl status ax-runner"
+echo "  systemctl status caddy"
 echo ""
 echo "On your laptop:"
 echo "  ax login ${PLATFORM_BASE_DOMAIN}"

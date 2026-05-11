@@ -10,21 +10,12 @@ http://{$PLATFORM_BASE_DOMAIN} {
 	handle /v1/* {
 		reverse_proxy 127.0.0.1:8080
 	}
-	handle /health {
-		reverse_proxy 127.0.0.1:8080
-	}
 }
 
-# Same host as setup/login: runner API + platform health + path-based apps.
+# Same host as setup/login: runner API + path-based apps.
 {$PLATFORM_BASE_DOMAIN} {
 	handle /v1/* {
 		reverse_proxy 127.0.0.1:8080
-	}
-	handle /health {
-		reverse_proxy 127.0.0.1:8080
-	}
-	handle /_ax/health {
-		respond "ok" 200
 	}
 
 	import /etc/caddy/apps/platform-routes/*.caddy

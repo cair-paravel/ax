@@ -367,3 +367,14 @@ def restart(name: str) -> None:
     if r.status_code >= 400:
         raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
     typer.echo(r.text.rstrip())
+
+
+@app.command()
+def health() -> None:
+    """Check runner health through the authenticated API."""
+    cfg = _load_client_config()
+    r = _runner_call(cfg, lambda c: c.get("v1/health"))
+    if r.status_code >= 400:
+        raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
+    data = r.json()
+    typer.echo(f"{data.get('status', 'unknown')}\tapps={data.get('apps', 0)}")

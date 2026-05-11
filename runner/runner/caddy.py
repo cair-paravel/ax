@@ -47,9 +47,6 @@ def reconcile_caddy() -> None:
         (platform_routes_dir / f"{app_name}.caddy").write_text(
             "\n".join(
                 [
-                    f"handle {path}/_ax/health {{",
-                    '  respond "ok" 200',
-                    "}",
                     f"handle_path {path}/* {{",
                     f"  reverse_proxy 127.0.0.1:{port}",
                     "}",
@@ -65,9 +62,6 @@ def reconcile_caddy() -> None:
 def _caddy_site(domains: list[str], port: int) -> str:
     doms = " ".join(domains)
     return f"""{doms} {{
-  handle /_ax/health {{
-    respond "ok" 200
-  }}
   reverse_proxy 127.0.0.1:{port}
 }}
 """

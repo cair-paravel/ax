@@ -26,6 +26,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/v1/health")
+def api_health(_: Annotated[None, Depends(require_auth)]) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "apps": len(list(APPS_ROOT.iterdir())) if APPS_ROOT.exists() else 0,
+    }
+
+
 @app.get("/v1/apps", response_model=list[AppSummary])
 def list_apps(_: Annotated[None, Depends(require_auth)]) -> list[AppSummary]:
     if not APPS_ROOT.exists():
