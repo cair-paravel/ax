@@ -50,11 +50,48 @@ fi
 PLATFORM_BASE_DOMAIN="${PLATFORM_BASE_DOMAIN:-}"
 RUNNER_TOKEN="${RUNNER_TOKEN:-}"
 
+prompt_yes_no() {
+  local prompt="$1"
+  local default="${2:-y}"
+  local reply=""
+  local suffix="[Y/n]"
+  if [[ "$default" == "n" ]]; then
+    suffix="[y/N]"
+  fi
+  while true; do
+    read -r -p "${prompt} ${suffix} " reply
+    reply="${reply,,}"
+    if [[ -z "$reply" ]]; then
+      reply="$default"
+    fi
+    case "$reply" in
+      y|yes) return 0 ;;
+      n|no) return 1 ;;
+    esac
+  done
+}
+
+if [[ -n "$PLATFORM_BASE_DOMAIN" && -t 0 ]]; then
+  if prompt_yes_no "Use existing PLATFORM_BASE_DOMAIN=${PLATFORM_BASE_DOMAIN}?" "y"; then
+    :
+  else
+    PLATFORM_BASE_DOMAIN=""
+  fi
+fi
+
 if [[ -z "$PLATFORM_BASE_DOMAIN" ]]; then
   if [[ ! -t 0 ]]; then
     die "PLATFORM_BASE_DOMAIN is not set and stdin is not a TTY. Export it or create ${ENV_FILE}."
   fi
   read -r -p "Runner host / PLATFORM_BASE_DOMAIN (hostname or IP, no https://): " PLATFORM_BASE_DOMAIN
+fi
+
+if [[ -n "$RUNNER_TOKEN" && -t 0 ]]; then
+  if prompt_yes_no "Use existing RUNNER_TOKEN from environment or ${ENV_FILE}?" "y"; then
+    :
+  else
+    RUNNER_TOKEN=""
+  fi
 fi
 
 if [[ -z "$RUNNER_TOKEN" ]]; then
