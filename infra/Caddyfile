@@ -2,26 +2,26 @@
 	# For local dev you may hit rate limits if you keep restarting.
 	# Uncomment to use Let's Encrypt staging:
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
-	admin 0.0.0.0:2019
+	admin 127.0.0.1:2019
 }
 
 # Runner API on :80 (needed for raw-IP base, and useful when TLS is not yet issued).
 http://{$PLATFORM_BASE_DOMAIN} {
 	handle /v1/* {
-		reverse_proxy ax-runner:8080
+		reverse_proxy 127.0.0.1:8080
 	}
 	handle /health {
-		reverse_proxy ax-runner:8080
+		reverse_proxy 127.0.0.1:8080
 	}
 }
 
 # Same host as setup/login: runner API + platform health + path-based apps.
 {$PLATFORM_BASE_DOMAIN} {
 	handle /v1/* {
-		reverse_proxy ax-runner:8080
+		reverse_proxy 127.0.0.1:8080
 	}
 	handle /health {
-		reverse_proxy ax-runner:8080
+		reverse_proxy 127.0.0.1:8080
 	}
 	handle /_ax/health {
 		respond "ok" 200

@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Bootstrap ax on a Hetzner (or any) Linux host with Docker.
-# Prompts for PLATFORM_BASE_DOMAIN and RUNNER_TOKEN when unset and not in infra/.env.
+# Bootstrap ax on a Linux host with systemd, Caddy, and uv.
 #
-# Pairing: on your laptop run `ax generate` once, use the same token here (paste or export RUNNER_TOKEN).
+# Pairing: on your laptop run `ax generate` once, use the same token here.
 # Non-interactive: export PLATFORM_BASE_DOMAIN and RUNNER_TOKEN before running.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="${REPO_ROOT}/infra"
 ENV_FILE="${INFRA_DIR}/.env"
-COMPOSE_FILE="${INFRA_DIR}/docker-compose.yml"
+RUNNER_DIR="${REPO_ROOT}/runner"
+CADDY_SOURCE="${INFRA_DIR}/Caddyfile"
+CADDY_TARGET="/etc/caddy/Caddyfile"
+RUNNER_ENV="/etc/ax/runner.env"
+RUNNER_SERVICE="/etc/systemd/system/ax-runner.service"
+CADDY_DROPIN_DIR="/etc/systemd/system/caddy.service.d"
+CADDY_DROPIN="${CADDY_DROPIN_DIR}/ax.conf"
 
 die() {
   echo "error: $*" >&2
@@ -20,11 +25,21 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing '$1'. Install it and retry."
 }
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  die "compose file not found: ${COMPOSE_FILE} (run this from a clone of the ax repo)"
+if [[ "$(uname -s)" != "Linux" ]]; then
+  die "setup.sh now targets Linux hosts with systemd. For local CLI dev, use uv sync in cli/."
 fi
 
-# Load existing infra/.env so we only prompt for missing values.
+if [[ "${EUID}" -ne 0 ]]; then
+  die "run setup as root so it can write /etc/caddy and /etc/systemd/system"
+fi
+
+[[ -f "$CADDY_SOURCE" ]] || die "Caddyfile not found: ${CADDY_SOURCE}"
+[[ -f "${RUNNER_DIR}/pyproject.toml" ]] || die "runner project not found: ${RUNNER_DIR}"
+
+require_cmd uv
+require_cmd caddy
+require_cmd systemctl
+
 if [[ -f "$ENV_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -39,14 +54,14 @@ if [[ -z "$PLATFORM_BASE_DOMAIN" ]]; then
   if [[ ! -t 0 ]]; then
     die "PLATFORM_BASE_DOMAIN is not set and stdin is not a TTY. Export it or create ${ENV_FILE}."
   fi
-  read -r -p "Runner host / PLATFORM_BASE_DOMAIN (your hostname or IP, no https:// — e.g. apps.example.com or 203.0.113.10): " PLATFORM_BASE_DOMAIN
+  read -r -p "Runner host / PLATFORM_BASE_DOMAIN (hostname or IP, no https://): " PLATFORM_BASE_DOMAIN
 fi
 
 if [[ -z "$RUNNER_TOKEN" ]]; then
   if [[ ! -t 0 ]]; then
-    die "RUNNER_TOKEN is not set and stdin is not a TTY. Export it (e.g. from \`ax generate\` on your laptop) or create ${ENV_FILE}."
+    die "RUNNER_TOKEN is not set and stdin is not a TTY. Export it or create ${ENV_FILE}."
   fi
-  echo "Runner API token: use the value from your laptop (\`ax generate\` → ~/.config/ax/runner-token), or enter a new secret."
+  echo "Runner API token: use the value from your laptop (\`ax generate\`), or enter a new secret."
   _suggest=""
   if command -v openssl >/dev/null 2>&1; then
     _suggest="$(openssl rand -hex 24)"
@@ -58,25 +73,64 @@ fi
 [[ -n "$PLATFORM_BASE_DOMAIN" ]] || die "PLATFORM_BASE_DOMAIN is empty."
 [[ -n "$RUNNER_TOKEN" ]] || die "RUNNER_TOKEN is empty."
 
-# Normalize: strip accidental scheme / trailing slash
 PLATFORM_BASE_DOMAIN="${PLATFORM_BASE_DOMAIN#https://}"
 PLATFORM_BASE_DOMAIN="${PLATFORM_BASE_DOMAIN#http://}"
 PLATFORM_BASE_DOMAIN="${PLATFORM_BASE_DOMAIN%/}"
+
+install -d -m 700 /etc/ax
+install -d -m 755 /etc/caddy/apps/platform-routes
+install -d -m 755 "$CADDY_DROPIN_DIR"
+install -d -m 755 /var/lib/ax/apps /var/cache/ax/uv
 
 umask 077
 cat >"$ENV_FILE" <<EOF
 PLATFORM_BASE_DOMAIN=${PLATFORM_BASE_DOMAIN}
 RUNNER_TOKEN=${RUNNER_TOKEN}
 EOF
-echo "wrote ${ENV_FILE} (mode 600)"
 
-require_cmd docker
-if ! docker compose version >/dev/null 2>&1; then
-  die "docker compose plugin missing. Install docker-compose-plugin."
-fi
+cat >"$RUNNER_ENV" <<EOF
+PLATFORM_BASE_DOMAIN=${PLATFORM_BASE_DOMAIN}
+RUNNER_TOKEN=${RUNNER_TOKEN}
+RUNNER_DATA_DIR=/var/lib/ax
+CADDY_APPS_DIR=/etc/caddy/apps
+CADDY_CONFIG=/etc/caddy/Caddyfile
+SYSTEMD_DIR=/etc/systemd/system
+UV_CACHE_DIR=/var/cache/ax/uv
+EOF
 
-echo "building and starting stack..."
-docker compose -f "$COMPOSE_FILE" up --build -d
+echo "synching runner environment..."
+uv sync --project "$RUNNER_DIR" --frozen
+
+install -m 644 "$CADDY_SOURCE" "$CADDY_TARGET"
+
+cat >"$CADDY_DROPIN" <<EOF
+[Service]
+EnvironmentFile=${RUNNER_ENV}
+EOF
+
+cat >"$RUNNER_SERVICE" <<EOF
+[Unit]
+Description=ax runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=${RUNNER_ENV}
+WorkingDirectory=${RUNNER_DIR}
+ExecStart=${RUNNER_DIR}/.venv/bin/python -m runner.main
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now caddy
+systemctl restart caddy
+systemctl enable --now ax-runner
+systemctl restart ax-runner
 
 echo ""
 echo "Health checks:"
@@ -84,8 +138,7 @@ echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/_ax/health"
 echo "  curl -fsS https://${PLATFORM_BASE_DOMAIN}/health"
 echo "  (IP-only base: use http://${PLATFORM_BASE_DOMAIN}/health on :80)"
 echo ""
-echo "On your laptop, install the CLI and log in:"
-echo "  uv tool install -e ${REPO_ROOT}/cli"
+echo "On your laptop:"
 echo "  ax login ${PLATFORM_BASE_DOMAIN}"
-echo "  (token: value of RUNNER_TOKEN in ${ENV_FILE}, or run ax generate first)"
-echo ""
+echo "  ax init"
+echo "  ax deploy"

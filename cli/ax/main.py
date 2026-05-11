@@ -90,9 +90,9 @@ def _write_ax_toml(path: Path, name: str) -> None:
     ax_path = path / "ax.toml"
     if ax_path.exists():
         raise typer.Exit("ax.toml already exists")
-    start = 'uv run uvicorn app:app --host 0.0.0.0 --port $PORT'
+    start = 'uvicorn app:app --host 127.0.0.1 --port $PORT'
     if (path / "main.py").exists():
-        start = 'uv run uvicorn main:app --host 0.0.0.0 --port $PORT'
+        start = 'uvicorn main:app --host 127.0.0.1 --port $PORT'
     ax_path.write_text(
         "\n".join(
             [
@@ -104,6 +104,12 @@ def _write_ax_toml(path: Path, name: str) -> None:
                 "[ingress]",
                 'mode = "platform-path"',
                 f'path = "/{name}"',
+                "",
+                "[runtime]",
+                'backend = "process"',
+                "# python = \"3.12\"",
+                "# memory = \"512M\"",
+                "# cpu = \"1\"",
                 "",
                 "[env]",
                 'ENV = "prod"',
@@ -258,6 +264,10 @@ def deploy(path: Path = typer.Option(Path("."), "--path")) -> None:
     if ingress is not None and not isinstance(ingress, dict):
         raise typer.Exit("[ingress] must be a table")
 
+    runtime = ax.get("runtime", {"backend": "process"})
+    if not isinstance(runtime, dict):
+        raise typer.Exit("[runtime] must be a table")
+
     payload = {
         "name": ax["name"],
         "type": ax.get("type", "web"),
@@ -266,6 +276,7 @@ def deploy(path: Path = typer.Option(Path("."), "--path")) -> None:
         # back-compat: allow top-level `domains = [...]`
         "domains": ax.get("domains", []),
         "ingress": ingress,
+        "runtime": runtime,
         "env": {str(k): str(v) for k, v in env.items()},
     }
 
@@ -330,7 +341,7 @@ def rm_(name: str) -> None:
 
 @app.command()
 def start(name: str) -> None:
-    """Start a stopped app container."""
+    """Start a stopped app service."""
     cfg = _load_client_config()
     r = _runner_call(cfg, lambda c: c.post(f"v1/apps/{name}/start"))
     if r.status_code >= 400:
@@ -340,7 +351,7 @@ def start(name: str) -> None:
 
 @app.command()
 def stop(name: str) -> None:
-    """Stop a running app container (does not remove the app)."""
+    """Stop a running app service (does not remove the app)."""
     cfg = _load_client_config()
     r = _runner_call(cfg, lambda c: c.post(f"v1/apps/{name}/stop"))
     if r.status_code >= 400:
@@ -350,10 +361,9 @@ def stop(name: str) -> None:
 
 @app.command()
 def restart(name: str) -> None:
-    """Restart an app container."""
+    """Restart an app service."""
     cfg = _load_client_config()
     r = _runner_call(cfg, lambda c: c.post(f"v1/apps/{name}/restart"))
     if r.status_code >= 400:
         raise typer.Exit(f"Request failed ({r.status_code}): {r.text}")
     typer.echo(r.text.rstrip())
-
